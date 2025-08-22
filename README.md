@@ -4,12 +4,13 @@ A comprehensive Model Context Protocol (MCP) client implementation in Go, provid
 
 ## Features
 
-- 🔍 **Server Discovery**: Automatically discover MCP servers on TCP ports and Docker containers
-- 🔌 **Multiple Transports**: Support for TCP, STDIO, WebSocket, and Docker-based connections
+- 🔍 **Server Discovery**: Automatically discover MCP servers on TCP ports, HTTP endpoints, and Docker containers
+- 🔌 **Multiple Transports**: Support for TCP, HTTP/SSE, HTTP Streaming, STDIO, and Docker-based connections
 - 💬 **Interactive CLI**: Full-featured command-line interface for server interaction
 - 🛠️ **Complete MCP Protocol**: Full support for Tools, Resources, and Prompts
 - 🐳 **Docker Support**: Direct support for Docker-based MCP servers
-- 📚 **Library Integration**: Use as a library in your Go applications
+- 🌐 **HTTP Support**: Support for both Server-Sent Events (SSE) and streaming HTTP modes
+- 📚 **Library Integration**: Use as a library in your Go applications ([Library Documentation](LIBRARY.md))
 - ⚡ **High Performance**: Written in Go for speed and efficiency
 
 ## Installation
@@ -44,7 +45,8 @@ go get github.com/kunalkushwaha/mcp-navigator-go
 ```
 
 This will show available servers including:
-- TCP servers on common MCP ports (8810-8820)
+- TCP servers on common MCP ports (8811, 8812, 8813, etc.)
+- HTTP MCP servers (both SSE and streaming modes)
 - Docker-based MCP servers
 - Standard Docker MCP configuration (alpine/socat)
 
@@ -71,6 +73,16 @@ Connect to a TCP server:
 ./mcp-navigator connect --tcp --host localhost --port 8811
 ```
 
+Connect to HTTP MCP server (SSE mode):
+```bash
+./mcp-navigator connect --http --url http://localhost:8812 --endpoint /sse/
+```
+
+Connect to HTTP MCP server (streaming mode):
+```bash
+./mcp-navigator connect --http --url http://localhost:8813 --endpoint /mcp
+```
+
 Connect to Docker MCP server:
 ```bash
 ./mcp-navigator connect --docker
@@ -81,7 +93,77 @@ Execute a tool directly:
 ./mcp-navigator tool --name search --arguments '{"query": "golang"}' --docker
 ```
 
-## Usage Examples
+## Library Usage
+
+MCP Navigator can be used as a library in your Go applications. 
+
+📚 **Documentation:**
+- [**Library Documentation**](LIBRARY.md) - Comprehensive guide with examples and best practices
+- [**API Reference**](API.md) - Concise API documentation and usage patterns
+
+### Quick Library Example
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+
+    "github.com/kunalkushwaha/mcp-navigator-go/pkg/client"
+    "github.com/kunalkushwaha/mcp-navigator-go/pkg/transport"
+)
+
+func main() {
+    // Create client with TCP transport
+    mcpClient := client.NewMCPClient(transport.NewTCPTransport("localhost", 8811))
+    
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    
+    // Connect and initialize
+    err := mcpClient.Connect(ctx)
+    if err != nil {
+        log.Fatalf("Failed to connect: %v", err)
+    }
+    defer mcpClient.Close()
+    
+    serverInfo, err := mcpClient.Initialize(ctx, "my-app", "1.0.0")
+    if err != nil {
+        log.Fatalf("Failed to initialize: %v", err)
+    }
+    
+    log.Printf("Connected to: %s %s", serverInfo.Name, serverInfo.Version)
+    
+    // List and execute tools
+    tools, err := mcpClient.ListTools(ctx)
+    if err != nil {
+        log.Fatalf("Failed to list tools: %v", err)
+    }
+    
+    for _, tool := range tools {
+        log.Printf("Available tool: %s", tool.Name)
+    }
+}
+```
+
+📖 **See [LIBRARY.md](LIBRARY.md) for:**
+- Complete transport examples (TCP, HTTP SSE, HTTP Streaming, STDIO, WebSocket)
+- Server discovery integration
+- Advanced usage patterns (builder pattern, service wrappers, error handling)
+- Testing strategies and mock implementations
+- Performance optimization techniques
+
+📋 **See [API.md](API.md) for:**
+- Complete API reference with all methods and types
+- Quick usage patterns and code snippets
+- Error handling strategies
+- Configuration options
+
+## CLI Usage
+
+The following examples show CLI usage. For library integration, see [Library Documentation](LIBRARY.md).
 
 ### Server Discovery
 
@@ -107,6 +189,12 @@ Execute a tool directly:
 ```bash
 # TCP connection
 ./mcp-navigator connect --tcp --host localhost --port 8811
+
+# HTTP connection (SSE mode)
+./mcp-navigator connect --http --url http://localhost:8812 --endpoint /sse/
+
+# HTTP connection (streaming mode) 
+./mcp-navigator connect --http --url http://localhost:8813 --endpoint /mcp
 
 # STDIO connection
 ./mcp-navigator connect --stdio --command "node" --args "server.js"
@@ -163,12 +251,19 @@ $ ./mcp-navigator interactive
 🚀 MCP Navigator Interactive Mode
 Type 'help' for available commands.
 🔍 Discovering MCP servers...
-✅ Found 3 server(s):
+✅ Found 6 server(s):
   1. TCP Server localhost:8811 (tcp)
      Address: localhost:8811
-  2. Docker Container mcp-server (docker)
-  3. Docker MCP (alpine/socat) (docker)
-     Address: host.docker.internal:8811
+  2. TCP Server localhost:8812 (tcp)
+     Address: localhost:8812
+  3. TCP Server localhost:8813 (tcp)
+     Address: localhost:8813
+  4. HTTP MCP Server (SSE) localhost:8812/sse/ (http)
+     Address: localhost:8812
+  5. HTTP MCP Server (Streaming) localhost:8813/mcp (http)
+     Address: localhost:8813
+  6. Docker MCP (Direct TCP) (docker)
+     Address: localhost:8811
 
 mcp-client> help
 
@@ -183,19 +278,21 @@ mcp-client> help
   status            - Show connection status
   exit/quit         - Exit the client
 
-mcp-client> connect 1
-🔌 Connecting to TCP Server localhost:8811...
-✅ Connected to TCP Server localhost:8811
-🚀 Server: mcp-server 1.0.0
+mcp-client> connect 5
+🔌 Connecting to HTTP MCP Server (Streaming) localhost:8813/mcp...
+✅ Connected to HTTP MCP Server (Streaming) localhost:8813/mcp
+🚀 Server: Docker AI MCP Gateway 2.0.1
 
 mcp-client> list-tools
-📝 Available tools (3):
-  1. search
-     Description: Search for information using DuckDuckGo
-  2. fetch_content
+📝 Available tools (4):
+  1. docker
+     Description: use the docker cli
+  2. fetch
+     Description: Fetches a URL from the internet and optionally extracts its contents as markdown
+  3. fetch_content
      Description: Fetch and parse content from a webpage URL
-  3. docker
-     Description: Execute Docker commands
+  4. search
+     Description: Search DuckDuckGo and return formatted results
 
 mcp-client> call-tool search {"query": "Model Context Protocol"}
 🔧 Calling tool: search
@@ -205,9 +302,9 @@ The Model Context Protocol (MCP) is an open standard that enables secure connect
 mcp-client> status
 
 📊 Status:
-  Available servers: 3
-  Current connection: TCP Server localhost:8811 ✅
-  Server info: mcp-server 1.0.0
+  Available servers: 6
+  Current connection: HTTP MCP Server (Streaming) localhost:8813/mcp ✅
+  Server info: Docker AI MCP Gateway 2.0.1
 
 mcp-client> exit
 
@@ -222,6 +319,8 @@ mcp-client> exit
 - `MCP_CLIENT_TIMEOUT`: Default timeout for operations (default: 30s)
 - `MCP_CLIENT_HOST`: Default host for TCP connections (default: localhost)
 - `MCP_CLIENT_PORT`: Default port for TCP connections (default: 8811)
+- `MCP_CLIENT_URL`: Default URL for HTTP connections (default: http://localhost:8812)
+- `MCP_CLIENT_ENDPOINT`: Default endpoint for HTTP connections (default: /mcp)
 - `MCP_CLIENT_VERBOSE`: Enable verbose logging (default: false)
 
 ### Config File
@@ -308,7 +407,7 @@ Start interactive mode
 │   ├── client/           # MCP client implementation
 │   ├── discovery/        # Server discovery logic
 │   ├── mcp/             # MCP protocol types and utilities
-│   └── transport/       # Transport implementations (TCP, STDIO, WebSocket)
+│   └── transport/       # Transport implementations (TCP, STDIO, WebSocket, HTTP)
 ├── go.mod
 └── README.md
 ```
@@ -339,6 +438,8 @@ go run main.go interactive
 
 ## Related
 
+- [Library Documentation](LIBRARY.md) - Comprehensive guide for using MCP Navigator as a library
+- [API Reference](API.md) - Concise API documentation and examples
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [MCP Specification](https://spec.modelcontextprotocol.io/)
 - [TypeScript MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk)

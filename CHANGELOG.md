@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Library integration guide
 - Production deployment guide
 
+### Changed
+- Synchronized `API.md` with actual code signatures (client constructor, ClientConfig, Initialize/Disconnect behavior, CallTool/ReadResource/Prompt response types).
+- Updated examples to use the current client API (`client.NewClient(transport, config)`), fixed content handling (use `content.Text != ""`), and corrected transport factory names (`NewStdioTransport` → `NewStdioTransport` / note capitalization).
+
+### Fixed
+- Fixed several example compilation/runtime issues caused by API drift: updated Initialize calls to use `mcp.ClientInfo`, replaced `Close()` usages with `Disconnect()`, and adjusted `ReadResource` handling to use `*mcp.ReadResourceResponse.Contents`.
+- Improved transport discovery heuristics used in examples to prefer streaming endpoints when available.
+
 ## [v1.0.0] - 2025-06-08
 
 ### Added

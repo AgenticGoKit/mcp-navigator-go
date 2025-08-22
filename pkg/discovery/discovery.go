@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kunalkushwaha/mcp-navigator-go/pkg/mcp"
 	"github.com/kunalkushwaha/mcp-navigator-go/pkg/transport"
 )
 
@@ -145,6 +146,8 @@ func (d *Discovery) CreateDockerMCPTransport() transport.Transport {
 func (d *Discovery) DiscoverCommonPorts(ctx context.Context, host string) []ServerInfo {
 	commonPorts := []int{
 		8811, // Common MCP port
+		8812, // HTTP/SSE MCP port
+		8813, // HTTP streaming MCP port
 		8080, // HTTP alternative
 		3000, // Development server
 		4000, // Development server
@@ -157,6 +160,208 @@ func (d *Discovery) DiscoverCommonPorts(ctx context.Context, host string) []Serv
 	return d.DiscoverTCPServers(ctx, host, commonPorts)
 }
 
+// DiscoverHTTPServers scans for HTTP/SSE MCP servers
+func (d *Discovery) DiscoverHTTPServers(ctx context.Context, host string) []ServerInfo {
+	d.logger.Printf("Scanning for HTTP/SSE MCP servers on %s", host)
+
+	var servers []ServerInfo
+
+	// Common HTTP ports that might host MCP servers
+	httpPorts := []int{8812, 8813, 8080, 3000, 4000, 5000, 8000}
+
+	// First, try streaming mode endpoints (simple HTTP)
+	streamingEndpoints := []string{"/mcp"}
+
+	// Then try SSE endpoints (complex HTTP)
+	sseEndpoints := []string{"/sse/", "/api/mcp/", "/"}
+
+	for _, port := range httpPorts {
+		if d.isPortOpen(host, port) {
+			baseURL := fmt.Sprintf("http://%s:%d", host, port)
+
+			// Try streaming mode first (preferred)
+			for _, endpoint := range streamingEndpoints {
+				if d.testStreamingMCPEndpoint(ctx, baseURL, endpoint) {
+					server := ServerInfo{
+						Name:        fmt.Sprintf("HTTP MCP Server (Streaming) %s:%d%s", host, port, endpoint),
+						Type:        "http",
+						Address:     host,
+						Port:        port,
+						Transport:   transport.NewStreamingHTTPTransport(baseURL, endpoint),
+						Description: fmt.Sprintf("HTTP MCP server (streaming mode) at %s%s", baseURL, endpoint),
+					}
+					servers = append(servers, server)
+					d.logger.Printf("Found HTTP MCP server (streaming): %s%s", baseURL, endpoint)
+					goto nextPort // Found streaming mode, skip SSE for this port
+				}
+			}
+
+			// If streaming mode not found, try SSE mode
+			for _, endpoint := range sseEndpoints {
+				if d.testSSEMCPEndpoint(ctx, baseURL, endpoint) {
+					server := ServerInfo{
+						Name:        fmt.Sprintf("HTTP MCP Server (SSE) %s:%d%s", host, port, endpoint),
+						Type:        "http",
+						Address:     host,
+						Port:        port,
+						Transport:   transport.NewSSETransport(baseURL, endpoint),
+						Description: fmt.Sprintf("HTTP/SSE MCP server at %s%s", baseURL, endpoint),
+					}
+					servers = append(servers, server)
+					d.logger.Printf("Found HTTP MCP server (SSE): %s%s", baseURL, endpoint)
+					break // Only add one endpoint per port
+				}
+			}
+		nextPort:
+		}
+	}
+
+	d.logger.Printf("HTTP discovery complete. Found %d servers", len(servers))
+	return servers
+}
+
+// testStreamingMCPEndpoint tests if an HTTP endpoint responds to MCP requests in streaming mode
+func (d *Discovery) testStreamingMCPEndpoint(ctx context.Context, baseURL, endpoint string) bool {
+	// Create a test simple HTTP transport (for streaming mode)
+	testTransport := transport.NewStreamingHTTPTransport(baseURL, endpoint)
+
+	// Create a test context with shorter timeout for discovery
+	testCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	// Try to connect
+	if err := testTransport.Connect(testCtx); err != nil {
+		return false
+	}
+	defer testTransport.Close()
+
+	// Create a simple initialize request to test if it's an MCP server
+	message := &mcp.Message{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+		Params: map[string]interface{}{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]interface{}{},
+			"clientInfo": map[string]interface{}{
+				"name":    "mcp-discovery",
+				"version": "1.0.0",
+			},
+		},
+	}
+
+	// Try to send the initialize request
+	if err := testTransport.Send(message); err != nil {
+		return false
+	}
+
+	// Try to receive response (with shorter timeout)
+	response, err := testTransport.Receive()
+	if err != nil {
+		return false
+	}
+
+	// Check if we got a valid MCP response
+	return response != nil && response.JSONRPC == "2.0"
+}
+
+// testSSEMCPEndpoint tests if an HTTP endpoint responds to MCP requests in SSE mode
+func (d *Discovery) testSSEMCPEndpoint(ctx context.Context, baseURL, endpoint string) bool {
+	// Create a test HTTP transport (for SSE mode)
+	testTransport := transport.NewSSETransport(baseURL, endpoint)
+
+	// Create a test context with shorter timeout for discovery
+	testCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	// Try to connect
+	if err := testTransport.Connect(testCtx); err != nil {
+		return false
+	}
+	defer testTransport.Close()
+
+	// Create a simple initialize request to test if it's an MCP server
+	message := &mcp.Message{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+		Params: map[string]interface{}{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]interface{}{},
+			"clientInfo": map[string]interface{}{
+				"name":    "mcp-discovery",
+				"version": "1.0.0",
+			},
+		},
+	}
+
+	// Try to send the initialize request
+	if err := testTransport.Send(message); err != nil {
+		return false
+	}
+
+	// Try to receive response (with shorter timeout)
+	response, err := testTransport.Receive()
+	if err != nil {
+		return false
+	}
+
+	// Check if we got a valid MCP response
+	return response != nil && response.JSONRPC == "2.0"
+}
+
+// testHTTPMCPEndpoint tests if an HTTP endpoint responds to MCP requests
+func (d *Discovery) testHTTPMCPEndpoint(ctx context.Context, baseURL, endpoint string) bool {
+	// Create a test HTTP transport
+	testTransport := transport.NewStreamingHTTPTransport(baseURL, endpoint)
+
+	// Create a test context with shorter timeout for discovery
+	testCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	// Try to connect
+	if err := testTransport.Connect(testCtx); err != nil {
+		return false
+	}
+	defer testTransport.Close()
+
+	// Create a simple initialize request to test if it's an MCP server
+	initRequest := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]interface{}{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]interface{}{},
+			"clientInfo": map[string]interface{}{
+				"name":    "mcp-discovery",
+				"version": "1.0.0",
+			},
+		},
+	}
+
+	// Try to send the initialize request
+	message := &mcp.Message{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+		Params:  initRequest["params"],
+	}
+
+	if err := testTransport.Send(message); err != nil {
+		return false
+	}
+
+	// Try to receive response (with shorter timeout)
+	response, err := testTransport.Receive()
+	if err != nil {
+		return false
+	}
+
+	// Check if we got a valid MCP response
+	return response != nil && response.JSONRPC == "2.0"
+}
+
 // DiscoverAll performs comprehensive server discovery
 func (d *Discovery) DiscoverAll(ctx context.Context, host string) []ServerInfo {
 	d.logger.Println("Starting comprehensive MCP server discovery...")
@@ -166,6 +371,10 @@ func (d *Discovery) DiscoverAll(ctx context.Context, host string) []ServerInfo {
 	// Discover TCP servers on common ports
 	tcpServers := d.DiscoverCommonPorts(ctx, host)
 	allServers = append(allServers, tcpServers...)
+
+	// Discover HTTP/SSE servers
+	httpServers := d.DiscoverHTTPServers(ctx, host)
+	allServers = append(allServers, httpServers...)
 
 	// Discover Docker servers
 	dockerServers := d.DiscoverDockerServers(ctx)

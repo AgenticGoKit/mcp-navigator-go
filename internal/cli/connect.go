@@ -16,12 +16,14 @@ import (
 )
 
 var (
-	connectHost    string
-	connectPort    int
-	connectCommand string
-	connectArgs    []string
-	connectType    string
-	connectTimeout time.Duration
+	connectHost     string
+	connectPort     int
+	connectCommand  string
+	connectArgs     []string
+	connectType     string
+	connectTimeout  time.Duration
+	connectURL      string
+	connectEndpoint string
 )
 
 // connectCmd represents the connect command
@@ -34,11 +36,13 @@ This command can connect to MCP servers using different transport methods:
 - TCP: Direct TCP connection to a server
 - STDIO: Execute a command and communicate via stdin/stdout  
 - Docker: Use Docker to run alpine/socat bridge to TCP server
+- HTTP: Connect to HTTP/SSE based MCP server
 
 Examples:
   mcp-client connect --tcp --host localhost --port 8811
   mcp-client connect --stdio --command node --args server.js
   mcp-client connect --docker  # Uses standard Docker MCP configuration
+  mcp-client connect --http --url http://localhost:8812 --endpoint /sse/
   mcp-client connect --type tcp --host 192.168.1.100 --port 8811`,
 	Run: runConnect,
 }
@@ -47,15 +51,18 @@ func init() {
 	rootCmd.AddCommand(connectCmd)
 
 	// Connection flags
-	connectCmd.Flags().StringVar(&connectType, "type", "tcp", "Connection type: tcp, stdio, or docker")
+	connectCmd.Flags().StringVar(&connectType, "type", "tcp", "Connection type: tcp, stdio, docker, or http")
 	connectCmd.Flags().BoolP("tcp", "t", false, "Use TCP transport")
 	connectCmd.Flags().BoolP("stdio", "s", false, "Use STDIO transport")
 	connectCmd.Flags().BoolP("docker", "d", false, "Use Docker transport (alpine/socat)")
+	connectCmd.Flags().Bool("http", false, "Use HTTP/SSE transport")
 
 	connectCmd.Flags().StringVar(&connectHost, "host", "localhost", "TCP host to connect to")
 	connectCmd.Flags().IntVar(&connectPort, "port", 8811, "TCP port to connect to")
 	connectCmd.Flags().StringVar(&connectCommand, "command", "", "Command to execute for STDIO transport")
 	connectCmd.Flags().StringSliceVar(&connectArgs, "args", []string{}, "Arguments for the command")
+	connectCmd.Flags().StringVar(&connectURL, "url", "http://localhost:8812", "Base URL for HTTP transport")
+	connectCmd.Flags().StringVar(&connectEndpoint, "endpoint", "/mcp", "Endpoint path for HTTP transport")
 	connectCmd.Flags().DurationVar(&connectTimeout, "timeout", 30*time.Second, "Connection timeout")
 }
 
@@ -69,6 +76,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 	tcpFlag, _ := cmd.Flags().GetBool("tcp")
 	stdioFlag, _ := cmd.Flags().GetBool("stdio")
 	dockerFlag, _ := cmd.Flags().GetBool("docker")
+	httpFlag, _ := cmd.Flags().GetBool("http")
 
 	transportType := connectType
 	if tcpFlag {
@@ -77,6 +85,8 @@ func runConnect(cmd *cobra.Command, args []string) {
 		transportType = "stdio"
 	} else if dockerFlag {
 		transportType = "docker"
+	} else if httpFlag {
+		transportType = "http"
 	}
 
 	fmt.Printf("🔌 Connecting to MCP server using %s transport...\n", transportType)
@@ -106,6 +116,17 @@ func runConnect(cmd *cobra.Command, args []string) {
 			"STDIO", "TCP:host.docker.internal:8811",
 		}
 		mcpTransport = transport.NewStdioTransport(dockerCommand, dockerArgs)
+
+	case "http":
+		fmt.Printf("   URL: %s%s\n", connectURL, connectEndpoint)
+		// Choose transport based on endpoint
+		if strings.Contains(connectEndpoint, "sse") {
+			// Use SSE transport for SSE endpoints
+			mcpTransport = transport.NewSSETransport(connectURL, connectEndpoint)
+		} else {
+			// Use streaming transport for streaming endpoints (/mcp, etc.)
+			mcpTransport = transport.NewStreamingHTTPTransport(connectURL, connectEndpoint)
+		}
 
 	default:
 		fmt.Printf("❌ Unsupported transport type: %s\n", transportType)
