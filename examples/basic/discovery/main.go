@@ -54,11 +54,8 @@ func exampleDiscoverAll() error {
 
 	fmt.Println("🔍 Discovering all MCP servers...")
 
-	discoverer := discovery.NewDiscoverer()
-	servers, err := discoverer.DiscoverAll(ctx)
-	if err != nil {
-		return fmt.Errorf("discovery failed: %w", err)
-	}
+	discoverer := discovery.NewDiscovery(nil)
+	servers := discoverer.DiscoverAll(ctx, "localhost")
 
 	fmt.Printf("✅ Found %d server(s):\n", len(servers))
 	for i, server := range servers {
@@ -81,13 +78,11 @@ func exampleDiscoverTCP() error {
 
 	fmt.Println("🔍 Scanning for TCP MCP servers...")
 
-	discoverer := discovery.NewDiscoverer()
+	discoverer := discovery.NewDiscovery(nil)
 
-	// Scan common MCP ports
-	servers, err := discoverer.DiscoverTCP(ctx, "localhost", 8810, 8820)
-	if err != nil {
-		return fmt.Errorf("TCP discovery failed: %w", err)
-	}
+	// Scan specified ports
+	ports := []int{8810, 8811, 8812, 8813, 8820}
+	servers := discoverer.DiscoverTCPServers(ctx, "localhost", ports)
 
 	fmt.Printf("✅ Found %d TCP server(s):\n", len(servers))
 	for i, server := range servers {
@@ -109,11 +104,8 @@ func exampleDiscoverHTTP() error {
 
 	fmt.Println("🔍 Scanning for HTTP MCP servers...")
 
-	discoverer := discovery.NewDiscoverer()
-	servers, err := discoverer.DiscoverHTTP(ctx, "localhost")
-	if err != nil {
-		return fmt.Errorf("HTTP discovery failed: %w", err)
-	}
+	discoverer := discovery.NewDiscovery(nil)
+	servers := discoverer.DiscoverHTTPServers(ctx, "localhost")
 
 	fmt.Printf("✅ Found %d HTTP server(s):\n", len(servers))
 	for i, server := range servers {
@@ -135,11 +127,8 @@ func exampleDiscoverDocker() error {
 
 	fmt.Println("🔍 Scanning for Docker MCP servers...")
 
-	discoverer := discovery.NewDiscoverer()
-	servers, err := discoverer.DiscoverDocker(ctx)
-	if err != nil {
-		return fmt.Errorf("Docker discovery failed: %w", err)
-	}
+	discoverer := discovery.NewDiscovery(nil)
+	servers := discoverer.DiscoverDockerServers(ctx)
 
 	fmt.Printf("✅ Found %d Docker server(s):\n", len(servers))
 	for i, server := range servers {
