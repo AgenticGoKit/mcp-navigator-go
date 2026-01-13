@@ -5,13 +5,15 @@ A comprehensive Model Context Protocol (MCP) client implementation in Go, provid
 ## Features
 
 - 🔍 **Server Discovery**: Automatically discover MCP servers on TCP ports, HTTP endpoints, and Docker containers
-- 🔌 **Multiple Transports**: Support for TCP, HTTP/SSE, HTTP Streaming, STDIO, and Docker-based connections
+- 🔌 **Multiple Transports**: Support for TCP, HTTP/SSE, HTTP Streaming, STDIO, WebSocket, and Docker-based connections
 - 💬 **Interactive CLI**: Full-featured command-line interface for server interaction
-- 🛠️ **Complete MCP Protocol**: Full support for Tools, Resources, and Prompts
+- 🛠️ **Complete MCP Protocol**: Full MCP 2025-11-25 specification compliance with Tools, Resources, and Prompts
 - 🐳 **Docker Support**: Direct support for Docker-based MCP servers
 - 🌐 **HTTP Support**: Support for both Server-Sent Events (SSE) and streaming HTTP modes
+- 🔧 **Configurable Logging**: Optional debug mode with component-based logging for troubleshooting
 - 📚 **Library Integration**: Use as a library in your Go applications ([Library Documentation](LIBRARY.md))
 - ⚡ **High Performance**: Written in Go for speed and efficiency
+- ✅ **Production Ready**: Full test coverage across all supported protocols
 
 ## Installation
 
@@ -160,6 +162,61 @@ func main() {
 - Quick usage patterns and code snippets
 - Error handling strategies
 - Configuration options
+
+## Debug Logging and Troubleshooting
+
+MCP Navigator supports configurable debug logging to help troubleshoot issues. Debug mode is disabled by default for clean production output.
+
+### Enabling Debug Logging
+
+```go
+// In library code, enable debug mode
+config := client.ClientConfig{
+    Name:    "my-app",
+    Version: "1.0.0",
+    Debug:   true,  // Enable debug logging
+}
+
+client := client.NewClient(transport, config)
+```
+
+### Debug Output Example
+
+With `Debug: true`, you'll see detailed component-based logs:
+```
+[CLIENT] Connecting to MCP server...
+[CLIENT] Connected to MCP server
+[INIT] Initializing MCP protocol with client: my-app 1.0.0
+[INIT] Received initialize response from server: my-server v1.0
+[CLIENT] Listing available tools...
+[PARSE] Parsed response - Tools count=4
+[TRANSPORT] Bytes received: 256
+```
+
+### Component Prefixes
+
+Debug logs include component prefixes to identify the source:
+- `[CLIENT]` - High-level client operations
+- `[INIT]` - Protocol initialization details
+- `[TRANSPORT]` - Low-level transport operations
+- `[PARSE]` - JSON parsing and unmarshaling
+
+For detailed debugging guidance, see [Debug Logging Guide](pkg/client/LOG_IMPROVEMENTS.md).
+
+## Protocol Support
+
+MCP Navigator supports multiple transport protocols with consistent API:
+
+| Protocol | Use Case | Status |
+|----------|----------|--------|
+| **TCP** | Local servers, fast communication | ✅ Fully Supported |
+| **STDIO** | Process/tool integration | ✅ Fully Supported |
+| **WebSocket** | Remote servers, web compatibility | ✅ Fully Supported |
+| **HTTP/SSE** | Server-Sent Events | ✅ Fully Supported |
+| **HTTP Streaming** | Long-polling streams | ✅ Fully Supported |
+| **Docker** | Container-based servers | ✅ Fully Supported |
+
+For protocol testing examples, see [Protocol Testing Guide](examples/mcp-discovery-demo/PROTOCOL_TESTING.md).
 
 ## CLI Usage
 

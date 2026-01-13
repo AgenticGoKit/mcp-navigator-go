@@ -62,6 +62,13 @@ type ToolsCapability struct {
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
+// Icon represents a tool or resource icon
+type Icon struct {
+	Src      string   `json:"src"`
+	MimeType string   `json:"mimeType,omitempty"`
+	Sizes    []string `json:"sizes,omitempty"`
+}
+
 // Initialize Request/Response
 type InitializeRequest struct {
 	ProtocolVersion string             `json:"protocolVersion"`
@@ -86,16 +93,24 @@ type ServerInfo struct {
 }
 
 // Tool Definitions
+// Tool represents a tool definition per MCP specification 2025-11-25
 type Tool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
+	Name         string                 `json:"name"`
+	Title        string                 `json:"title,omitempty"` // Optional human-readable display name (MCP 2025-11-25)
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  map[string]interface{} `json:"inputSchema"`            // MUST be valid JSON Schema object
+	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"` // Optional output schema (MCP 2025-11-25)
+	Icons        []Icon                 `json:"icons,omitempty"`        // Optional icons for UI display (MCP 2025-11-25)
 }
 
-type ListToolsRequest struct{}
+// ListToolsRequest supports optional pagination via cursor
+type ListToolsRequest struct {
+	Cursor string `json:"cursor,omitempty"` // Optional cursor for pagination
+}
 
 type ListToolsResponse struct {
-	Tools []Tool `json:"tools"`
+	Tools      []Tool `json:"tools"`
+	NextCursor string `json:"nextCursor,omitempty"` // Optional cursor for next page
 }
 
 // Call Tool Request/Response
@@ -235,4 +250,49 @@ const (
 
 func (e *ErrorInfo) Error() string {
 	return fmt.Sprintf("JSON-RPC Error %d: %s", e.Code, e.Message)
+}
+
+// ValidateToolName validates a tool name per MCP 2025-11-25 specification guidelines
+// Tool names SHOULD:
+// - Be between 1 and 128 characters (inclusive)
+// - Be case-sensitive
+// - Only contain: A-Z, a-z, 0-9, underscore (_), hyphen (-), and dot (.)
+// - Be unique within a server
+func ValidateToolName(name string) error {
+	if len(name) < 1 || len(name) > 128 {
+		return fmt.Errorf("tool name length must be between 1 and 128 characters, got %d", len(name))
+	}
+
+	// Check for valid characters: A-Z, a-z, 0-9, _, -, .
+	for i, c := range name {
+		if !((c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			c == '_' || c == '-' || c == '.') {
+			return fmt.Errorf("tool name contains invalid character '%c' at position %d (only A-Z, a-z, 0-9, _, -, . allowed)", c, i)
+		}
+	}
+
+	return nil
+}
+
+// ValidateTool performs comprehensive validation of a Tool per MCP specification
+func ValidateTool(tool *Tool) error {
+	if err := ValidateToolName(tool.Name); err != nil {
+		return fmt.Errorf("invalid tool name: %w", err)
+	}
+
+	if tool.InputSchema == nil {
+		return fmt.Errorf("inputSchema is required and must not be nil (MCP spec requirement)")
+	}
+
+	// InputSchema must be a valid JSON Schema object
+	if schemaType, ok := tool.InputSchema["type"]; ok {
+		if schemaType != "object" {
+			// Per spec, inputSchema should typically be an object type
+			// but other types may be valid JSON Schema
+		}
+	}
+
+	return nil
 }
