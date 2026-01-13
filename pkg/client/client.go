@@ -55,6 +55,7 @@ type Client struct {
 	requestID          int64
 	logger             *log.Logger
 	timeout            time.Duration
+	debug              bool // Enable debug logging
 }
 
 // ClientConfig holds configuration for the MCP client
@@ -63,6 +64,7 @@ type ClientConfig struct {
 	Version string
 	Logger  *log.Logger
 	Timeout time.Duration
+	Debug   bool // Enable debug logging for troubleshooting
 }
 
 // NewClient creates a new MCP client with the given transport and configuration.
@@ -91,10 +93,38 @@ func NewClient(transport transport.Transport, config ClientConfig) *Client {
 		config.Timeout = 30 * time.Second
 	}
 
-	return &Client{
+	client := &Client{
 		transport: transport,
 		logger:    config.Logger,
 		timeout:   config.Timeout,
+		debug:     config.Debug,
+	}
+
+	// Enable debug mode on transport if it supports it
+	if config.Debug {
+		// Type assert to check if it's a TCPTransport
+		type debuggable interface {
+			SetDebug(bool)
+		}
+		if dt, ok := transport.(debuggable); ok {
+			dt.SetDebug(true)
+		}
+	}
+
+	return client
+}
+
+// logf logs a message with optional component prefix and debug flag
+// This is a helper for structured logging that respects the debug flag
+// Format: [component] message
+func (c *Client) logf(component string, format string, args ...interface{}) {
+	if !c.debug {
+		return
+	}
+	if component != "" {
+		c.logger.Printf("[%s] %s", component, fmt.Sprintf(format, args...))
+	} else {
+		c.logger.Printf(format, args...)
 	}
 }
 
@@ -115,14 +145,18 @@ func (c *Client) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	c.logger.Println("Connecting to MCP server...")
+	if c.debug {
+		c.logger.Println("Connecting to MCP server...")
+	}
 
 	if err := c.transport.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect transport: %w", err)
+		return fmt.Errorf("failed to connect: %w", err)
 	}
 
 	c.connected = true
-	c.logger.Println("Connected to MCP server")
+	if c.debug {
+		c.logger.Println("Connected to MCP server")
+	}
 	return nil
 }
 
@@ -139,9 +173,12 @@ func (c *Client) Initialize(ctx context.Context, clientInfo mcp.ClientInfo) erro
 	if !c.IsConnected() {
 		return ErrNotConnected
 	}
-	c.logger.Printf("Initializing MCP protocol with client: %s %s", clientInfo.Name, clientInfo.Version)
 
-	c.logger.Printf("Creating initialize request...")
+	if c.debug {
+		c.logger.Printf("Initializing MCP protocol with client: %s %s", clientInfo.Name, clientInfo.Version)
+		c.logger.Printf("Creating initialize request...")
+	}
+
 	// Create initialize request
 	request := mcp.InitializeRequest{
 		ProtocolVersion: mcp.Version,
@@ -151,14 +188,21 @@ func (c *Client) Initialize(ctx context.Context, clientInfo mcp.ClientInfo) erro
 		},
 		ClientInfo: clientInfo,
 	}
-	c.logger.Printf("Initialize request created successfully")
+
+	if c.debug {
+		c.logger.Printf("Initialize request created successfully")
+		c.logger.Printf("Sending initialize request...")
+	}
+
 	// Send initialize request
-	c.logger.Printf("Sending initialize request...")
 	response, err := c.sendRequest(ctx, "initialize", request)
 	if err != nil {
 		return fmt.Errorf("initialize request failed: %w", err)
 	}
-	c.logger.Printf("Received initialize response")
+
+	if c.debug {
+		c.logger.Printf("Received initialize response")
+	}
 
 	if response.Error != nil {
 		return fmt.Errorf("initialize error: %s", response.Error.Message)
@@ -166,7 +210,7 @@ func (c *Client) Initialize(ctx context.Context, clientInfo mcp.ClientInfo) erro
 
 	// Parse initialize response
 	var initResponse mcp.InitializeResponse
-	if err := parseResult(response.Result, &initResponse); err != nil {
+	if err := c.parseResult(response.Result, &initResponse); err != nil {
 		return fmt.Errorf("failed to parse initialize response: %w", err)
 	}
 
@@ -176,8 +220,10 @@ func (c *Client) Initialize(ctx context.Context, clientInfo mcp.ClientInfo) erro
 	c.initialized = true
 	c.mu.Unlock()
 
-	c.logger.Printf("MCP protocol initialized. Server: %s %s",
-		initResponse.ServerInfo.Name, initResponse.ServerInfo.Version)
+	if c.debug {
+		c.logger.Printf("MCP protocol initialized. Server: %s %s",
+			initResponse.ServerInfo.Name, initResponse.ServerInfo.Version)
+	}
 
 	// Send initialized notification
 	notification := mcp.NewNotification("notifications/initialized", nil)
@@ -197,7 +243,9 @@ func (c *Client) Disconnect() error {
 		return nil
 	}
 
-	c.logger.Println("Disconnecting from MCP server...")
+	if c.debug {
+		c.logger.Println("Disconnecting from MCP server...")
+	}
 
 	err := c.transport.Close()
 	c.connected = false
@@ -205,7 +253,9 @@ func (c *Client) Disconnect() error {
 	c.serverInfo = nil
 	c.serverCapabilities = nil
 
-	c.logger.Println("Disconnected from MCP server")
+	if c.debug {
+		c.logger.Println("Disconnected from MCP server")
+	}
 	return err
 }
 
@@ -246,16 +296,35 @@ func (c *Client) GetServerCapabilities() *mcp.ServerCapabilities {
 }
 
 // ListTools retrieves all available tools from the server
+// Per MCP spec, this handles pagination automatically by fetching all pages
 func (c *Client) ListTools(ctx context.Context) ([]mcp.Tool, error) {
+	return c.ListToolsWithCursor(ctx, "")
+}
+
+// ListToolsWithCursor retrieves tools from the server with optional pagination cursor
+// This is MCP 2025-11-25 compliant and supports server-side pagination
+func (c *Client) ListToolsWithCursor(ctx context.Context, cursor string) ([]mcp.Tool, error) {
 	if !c.IsInitialized() {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	c.logger.Println("Listing available tools...")
+	if c.debug {
+		c.logger.Println("Listing available tools...")
+	}
 
-	response, err := c.sendRequest(ctx, "tools/list", mcp.ListToolsRequest{})
+	// Create request with optional cursor for pagination (MCP spec compliant)
+	request := mcp.ListToolsRequest{
+		Cursor: cursor,
+	}
+
+	response, err := c.sendRequest(ctx, "tools/list", request)
 	if err != nil {
 		return nil, fmt.Errorf("list tools request failed: %w", err)
+	}
+
+	if c.debug {
+		c.logger.Printf("DEBUG ListTools: Response ID=%v, Error=%v", response.ID, response.Error)
+		c.logger.Printf("DEBUG ListTools: Result type=%T, value=%+v", response.Result, response.Result)
 	}
 
 	if response.Error != nil {
@@ -263,11 +332,22 @@ func (c *Client) ListTools(ctx context.Context) ([]mcp.Tool, error) {
 	}
 
 	var listResponse mcp.ListToolsResponse
-	if err := parseResult(response.Result, &listResponse); err != nil {
+	if err := c.parseResult(response.Result, &listResponse); err != nil {
+		c.logger.Printf("ERROR ListTools: Failed to parse result - %v", err)
+		c.logger.Printf("ERROR ListTools: Raw result was: %+v", response.Result)
 		return nil, fmt.Errorf("failed to parse list tools response: %w", err)
 	}
 
-	c.logger.Printf("Found %d tools", len(listResponse.Tools))
+	if c.debug {
+		c.logger.Printf("DEBUG ListTools: Parsed response - Tools count=%d, NextCursor=%s", len(listResponse.Tools), listResponse.NextCursor)
+		for i, tool := range listResponse.Tools {
+			c.logger.Printf("DEBUG ListTools: Tool[%d]: Name=%s, Title=%s, Description=%s", i, tool.Name, tool.Title, tool.Description)
+		}
+	}
+
+	if c.debug {
+		c.logger.Printf("Found %d tools", len(listResponse.Tools))
+	}
 	return listResponse.Tools, nil
 }
 
@@ -282,7 +362,9 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 		return nil, fmt.Errorf("connection check failed: %w", err)
 	}
 
-	c.logger.Printf("Calling tool: %s", name)
+	if c.debug {
+		c.logger.Printf("Calling tool: %s", name)
+	}
 
 	request := mcp.CallToolRequest{
 		Name:      name,
@@ -299,11 +381,13 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 	}
 
 	var callResponse mcp.CallToolResponse
-	if err := parseResult(response.Result, &callResponse); err != nil {
+	if err := c.parseResult(response.Result, &callResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse call tool response: %w", err)
 	}
 
-	c.logger.Printf("Tool '%s' executed successfully", name)
+	if c.debug {
+		c.logger.Printf("Tool '%s' executed successfully", name)
+	}
 	return &callResponse, nil
 }
 
@@ -313,7 +397,9 @@ func (c *Client) ListResources(ctx context.Context) ([]mcp.Resource, error) {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	c.logger.Println("Listing available resources...")
+	if c.debug {
+		c.logger.Println("Listing available resources...")
+	}
 
 	response, err := c.sendRequest(ctx, "resources/list", mcp.ListResourcesRequest{})
 	if err != nil {
@@ -325,11 +411,13 @@ func (c *Client) ListResources(ctx context.Context) ([]mcp.Resource, error) {
 	}
 
 	var listResponse mcp.ListResourcesResponse
-	if err := parseResult(response.Result, &listResponse); err != nil {
+	if err := c.parseResult(response.Result, &listResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse list resources response: %w", err)
 	}
 
-	c.logger.Printf("Found %d resources", len(listResponse.Resources))
+	if c.debug {
+		c.logger.Printf("Found %d resources", len(listResponse.Resources))
+	}
 	return listResponse.Resources, nil
 }
 
@@ -339,7 +427,9 @@ func (c *Client) ListPrompts(ctx context.Context) ([]mcp.Prompt, error) {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	c.logger.Println("Listing available prompts...")
+	if c.debug {
+		c.logger.Println("Listing available prompts...")
+	}
 
 	response, err := c.sendRequest(ctx, "prompts/list", mcp.ListPromptsRequest{})
 	if err != nil {
@@ -351,11 +441,13 @@ func (c *Client) ListPrompts(ctx context.Context) ([]mcp.Prompt, error) {
 	}
 
 	var listResponse mcp.ListPromptsResponse
-	if err := parseResult(response.Result, &listResponse); err != nil {
+	if err := c.parseResult(response.Result, &listResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse list prompts response: %w", err)
 	}
 
-	c.logger.Printf("Found %d prompts", len(listResponse.Prompts))
+	if c.debug {
+		c.logger.Printf("Found %d prompts", len(listResponse.Prompts))
+	}
 	return listResponse.Prompts, nil
 }
 
@@ -365,7 +457,9 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	c.logger.Printf("Getting prompt: %s", name)
+	if c.debug {
+		c.logger.Printf("Getting prompt: %s", name)
+	}
 
 	request := mcp.GetPromptRequest{
 		Name:      name,
@@ -382,11 +476,13 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 	}
 
 	var promptResponse mcp.GetPromptResponse
-	if err := parseResult(response.Result, &promptResponse); err != nil {
+	if err := c.parseResult(response.Result, &promptResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse get prompt response: %w", err)
 	}
 
-	c.logger.Printf("Retrieved prompt '%s' with %d messages", name, len(promptResponse.Messages))
+	if c.debug {
+		c.logger.Printf("Retrieved prompt '%s' with %d messages", name, len(promptResponse.Messages))
+	}
 	return &promptResponse, nil
 }
 
@@ -396,7 +492,9 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*mcp.ReadResourc
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	c.logger.Printf("Reading resource: %s", uri)
+	if c.debug {
+		c.logger.Printf("Reading resource: %s", uri)
+	}
 
 	request := mcp.ReadResourceRequest{
 		URI: uri,
@@ -412,11 +510,13 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*mcp.ReadResourc
 	}
 
 	var resourceResponse mcp.ReadResourceResponse
-	if err := parseResult(response.Result, &resourceResponse); err != nil {
+	if err := c.parseResult(response.Result, &resourceResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse read resource response: %w", err)
 	}
 
-	c.logger.Printf("Read resource '%s' with %d content items", uri, len(resourceResponse.Contents))
+	if c.debug {
+		c.logger.Printf("Read resource '%s' with %d content items", uri, len(resourceResponse.Contents))
+	}
 	return &resourceResponse, nil
 }
 
@@ -481,9 +581,13 @@ func (c *Client) handleMessage(message *mcp.Message) {
 }
 
 // parseResult parses a response result into the target structure
-func parseResult(result interface{}, target interface{}) error {
+func (c *Client) parseResult(result interface{}, target interface{}) error {
 	if result == nil {
 		return fmt.Errorf("result is nil")
+	}
+
+	if c.debug {
+		c.logger.Printf("DEBUG parseResult: Input type=%T", result)
 	}
 
 	// Convert result to JSON and back to properly unmarshal into target
@@ -492,8 +596,19 @@ func parseResult(result interface{}, target interface{}) error {
 		return fmt.Errorf("failed to marshal result: %w", err)
 	}
 
+	if c.debug {
+		c.logger.Printf("DEBUG parseResult: Marshaled JSON (length=%d): %s", len(jsonData), string(jsonData))
+	}
+
 	if err := json.Unmarshal(jsonData, target); err != nil {
-		return fmt.Errorf("failed to unmarshal result: %w", err)
+		if c.debug {
+			c.logger.Printf("ERROR parseResult: Unmarshal failed - %v", err)
+		}
+		return fmt.Errorf("failed to unmarshal result into %T (json=%s): %w", target, string(jsonData), err)
+	}
+
+	if c.debug {
+		c.logger.Printf("DEBUG parseResult: Successfully unmarshaled into %T: %+v", target, target)
 	}
 
 	return nil

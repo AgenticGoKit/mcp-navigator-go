@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ type TCPTransport struct {
 	connected bool
 	mu        sync.RWMutex
 	timeout   time.Duration
+	debug     bool // Enable debug logging
 }
 
 // NewTCPTransport creates a new TCP transport
@@ -122,9 +124,21 @@ func (t *TCPTransport) Receive() (*mcp.Message, error) {
 		return nil, fmt.Errorf("failed to read message: %w", err)
 	}
 
+	if t.debug {
+		log.Printf("DEBUG TCP Receive: Raw bytes (length=%d): %s", len(line), string(line))
+	}
+
 	var message mcp.Message
 	if err := json.Unmarshal(line, &message); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
+		if t.debug {
+			log.Printf("ERROR TCP Receive: Unmarshal failed - %v", err)
+		}
+		return nil, fmt.Errorf("failed to unmarshal message (data=%s): %w", string(line), err)
+	}
+
+	if t.debug {
+		log.Printf("DEBUG TCP Receive: Unmarshaled - JSONRPC=%s, ID=%v, Method=%s, Result type=%T",
+			message.JSONRPC, message.ID, message.Method, message.Result)
 	}
 
 	return &message, nil
@@ -162,4 +176,11 @@ func (t *TCPTransport) SetTimeout(timeout time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.timeout = timeout
+}
+
+// SetDebug enables or disables debug logging
+func (t *TCPTransport) SetDebug(debug bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.debug = debug
 }

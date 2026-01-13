@@ -5,63 +5,56 @@ All notable changes to MCP Navigator will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+
+
+## [v2.0.0] - 2026-01-14
 
 ### Added
-- Initial release of MCP Navigator
-- Complete MCP protocol implementation (Tools, Resources, Prompts)
-- Server discovery capabilities for TCP and Docker
-- Multiple transport support (TCP, STDIO, WebSocket)
-- Interactive CLI interface
-- Library support for Go applications
-- Builder pattern for easy client configuration
-- Comprehensive examples and documentation
-
-### Features
-- **CLI Tool**: Full-featured command-line interface
-  - `discover` - Find available MCP servers
-  - `connect` - Connect to specific servers
-  - `interactive` - Interactive mode with auto-completion
-  - `tool` - Execute tools directly from command line
-
-- **Library**: Production-ready Go library
-  - Thread-safe client implementation
-  - Fluent builder pattern for configuration
-  - Complete MCP protocol support
-  - Extensive documentation and examples
-
-- **Discovery**: Unique server discovery capabilities
-  - Automatic TCP port scanning
-  - Docker container discovery
-  - Connection health testing
-  - Multi-protocol support
-
-### Transport Support
-- TCP: Native TCP socket connections
-- STDIO: Process-based communication
-- WebSocket: Web-compatible transport
-- Docker: Direct container communication
-
-### MCP Protocol
-- ✅ Tools: List and execute tools
-- ✅ Resources: List and read resources
-- ✅ Prompts: List and execute prompts
-- ✅ Server capabilities negotiation
-- ✅ Error handling and recovery
-
-### Documentation
-- Complete API documentation
-- Usage examples and tutorials
-- Library integration guide
-- Production deployment guide
-
-### Changed
-- Synchronized `API.md` with actual code signatures (client constructor, ClientConfig, Initialize/Disconnect behavior, CallTool/ReadResource/Prompt response types).
-- Updated examples to use the current client API (`client.NewClient(transport, config)`), fixed content handling (use `content.Text != ""`), and corrected transport factory names (`NewStdioTransport` → `NewStdioTransport` / note capitalization).
+- **WebSocket Transport Support** - New WebSocket transport for web-compatible MCP servers
+- **Configurable Debug Logging** - Optional debug mode with component-based logging (disabled by default for clean production output)
+- **Component Prefixes in Logs** - [CLIENT], [INIT], [TRANSPORT], [PARSE] prefixes for easier troubleshooting
+- **MCP 2025-11-25 Compliance** - Full specification compliance with pagination support and optional fields
+- **Protocol Testing Suite** - Comprehensive test clients for all supported protocols (TCP, STDIO, WebSocket)
+- **Tool Icons Support** - Support for icon specifications in tool definitions
+- **Tool Pagination** - Cursor-based pagination for tool listings (ListToolsWithCursor method)
+- **OutputSchema Support** - Optional output schema field for tools per MCP spec
 
 ### Fixed
-- Fixed several example compilation/runtime issues caused by API drift: updated Initialize calls to use `mcp.ClientInfo`, replaced `Close()` usages with `Disconnect()`, and adjusted `ReadResource` handling to use `*mcp.ReadResourceResponse.Contents`.
-- Improved transport discovery heuristics used in examples to prefer streaming endpoints when available.
+- **ListTools() Returning Empty Array** - Fixed critical bug where ListTools() would return empty array despite server sending tools
+  - Root cause: Improved JSON parsing and validation of tool responses
+  - Added comprehensive DEBUG logging to trace data flow
+  - Added MCP validation functions (ValidateToolName, ValidateTool)
+- **Verbose Logging in Production** - Wrapped all verbose client logs with debug checks to prevent log pollution in production
+- **Protocol Compliance** - Fixed server implementation issues in example math-server:
+  - Proper JSON-RPC error format with {code, message} structure
+  - Correct notification handling (notifications/initialized)
+- **Transport Initialization** - Improved connection state management across all transports
+
+### Changed
+- **Client.ListTools()** - Now uses ListToolsWithCursor internally for pagination support
+- **Debug Logging** - All logging is now conditional on `Debug: true` in ClientConfig
+- **Logger Helper** - Added `Client.logf()` method for structured component-based logging in library
+- **Test Client Examples** - Updated with modern MCP client initialization patterns
+
+### Improved
+- **Performance** - No logging overhead in production (debug=false)
+- **Observability** - Detailed logs available on-demand for troubleshooting
+- **Documentation** - Added logging guides and protocol testing documentation
+- **Test Coverage** - Added test clients for all transport protocols with working examples
+
+### Documentation
+- [LOG_IMPROVEMENTS.md](pkg/client/LOG_IMPROVEMENTS.md) - Guide to configurable debug logging
+- [PROTOCOL_TESTING.md](examples/mcp-discovery-demo/PROTOCOL_TESTING.md) - How to test all protocols
+- [PROTOCOL_TEST_RESULTS.md](examples/mcp-discovery-demo/PROTOCOL_TEST_RESULTS.md) - Complete test results
+- [QUICK_REFERENCE.md](examples/mcp-discovery-demo/QUICK_REFERENCE.md) - Quick reference for testing
+
+### Validation
+- ✅ TCP Protocol: Tested and working
+- ✅ STDIO Protocol: Tested and working
+- ✅ WebSocket Protocol: Tested and working
+- ✅ Tool Discovery: All 4 tools returned with complete schemas
+- ✅ Tool Execution: CallTool works across all protocols
+- ✅ MCP Spec Compliance: Validated against 2025-11-25 specification
 
 ## [v1.0.0] - 2025-06-08
 
